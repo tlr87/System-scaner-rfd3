@@ -18,26 +18,56 @@ def run_wmic(command):
         return "Unavailable"
 
 # ===============================
-# Check Windows 11 compatibility
+# Check Windows 11 requirements
 # ===============================
-def check_windows11():
-    os_name = platform.system()
-    if os_name != "Windows":
-        return False, f"Unsupported OS: {os_name}"
-    
-    try:
-        build_number = int(subprocess.check_output(
-            'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v CurrentBuildNumber',
-            shell=True
-        ).decode().split()[-1])
-    except Exception as e:
-        return False, f"Could not determine Windows build number: {e}"
+def check_win11_requirements():
+    results = {}
 
-    if build_number >= 22000:
-        return True, f"Windows 11 detected (build {build_number})"
-    else:
-        return False, f"Unsupported Windows version: build {build_number} (requires 22000+)"
-    
+    # CPU: at least 2 cores, 64-bit
+    cores = psutil.cpu_count(logical=False)
+    arch = platform.machine()
+    cpu_ok = cores >= 2 and arch.endswith('64')
+    results["CPU"] = f"{cores} cores, {arch} - {'✔' if cpu_ok else '✖'}"
+
+    # RAM >= 4 GB
+    ram_gb = round(psutil.virtual_memory().total / (1024**3))
+    ram_ok = ram_gb >= 4
+    results["RAM"] = f"{ram_gb} GB - {'✔' if ram_ok else '✖'}"
+
+    # Storage C: >= 64 GB
+    try:
+        disk = psutil.disk_usage("C:\\")
+        disk_gb = disk.total // (1024**3)
+        storage_ok = disk_gb >= 64
+        results["Storage"] = f"{disk_gb} GB - {'✔' if storage_ok else '✖'}"
+    except:
+        results["Storage"] = "Unknown"
+
+    # TPM 2.0
+    try:
+        tpm_output = subprocess.check_output(
+            'powershell "get-tpm | select TpmPresent,TpmReady,TpmVersion"',
+            shell=True
+        ).decode()
+        tpm_present = "True" in tpm_output
+        tpm_version_ok = "2.0" in tpm_output
+        results["TPM 2.0"] = f"{tpm_output.strip()} - {'✔' if tpm_present and tpm_version_ok else '✖'}"
+    except:
+        results["TPM 2.0"] = "TPM not detected - ✖"
+
+    # Secure Boot
+    try:
+        sb = subprocess.check_output(
+            'powershell "(Confirm-SecureBootUEFI)"',
+            shell=True
+        ).decode().strip()
+        sb_ok = sb.lower() == 'true'
+        results["Secure Boot"] = f"{sb} - {'✔' if sb_ok else '✖'}"
+    except:
+        results["Secure Boot"] = "Secure Boot check unavailable"
+
+    return results
+
 # ===============================
 # Get system information
 # ===============================
@@ -104,36 +134,38 @@ def get_system_info():
     return info
 
 # ===============================
-# Save info to timestamped text file in the script's folder
+# Save info to timestamped text file in output folder
 # ===============================
-def save_to_file(info, win11_status):
-    # Get folder where the script is located
+def save_to_file(info, win11_checks):
     script_folder = os.path.dirname(os.path.abspath(__file__))
-    
+    output_folder = os.path.join(script_folder, "output")
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    OUTPUT_FILE = os.path.join(script_folder, f"system_inventory_{timestamp}.txt")
-    
+    OUTPUT_FILE = os.path.join(output_folder, f"system_inventory_{timestamp}.txt")
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("SYSTEM INVENTORY REPORT\n")
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        # Windows 11 compatibility section
-        f.write("=== Windows 11 Compatibility ===\n")
-        if win11_status[0]:
-            f.write(f"✔ {win11_status[1]}\n\n")
-        else:
-            f.write(f"✖ {win11_status[1]}\n\n")
-        
+
+        # Windows 11 technical requirements
+        f.write("=== Windows 11 Technical Requirements ===\n")
+        for k, v in win11_checks.items():
+            f.write(f"{k}: {v}\n")
+        f.write("\n")
+
         # All other system info
+        f.write("=== System Information ===\n")
         for key, value in info.items():
             f.write(f"{key}: {value}\n")
-    
+
     print(f"System info saved to {OUTPUT_FILE}")
 
 # ===============================
 # Main Execution
 # ===============================
 if __name__ == "__main__":
-    win11_status = check_windows11()
+    win11_checks = check_win11_requirements()
     system_info = get_system_info()
-    save_to_file(system_info, win11_status)
+    save_to_file(system_info, win11_checks)
