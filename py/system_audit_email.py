@@ -8,31 +8,6 @@ from datetime import datetime
 import os
 
 # ===============================
-# Compatibility Check for Windows 11
-# ===============================
-def check_compatibility():
-    os_name = platform.system()
-    
-    if os_name != "Windows":
-        print(f"Unsupported OS: {os_name}. This tool requires Windows 11.")
-        sys.exit(1)
-    
-    try:
-        build_number = int(subprocess.check_output(
-            'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v CurrentBuildNumber',
-            shell=True
-        ).decode().split()[-1])
-    except Exception as e:
-        print(f"Could not determine Windows build number: {e}")
-        sys.exit(1)
-    
-    if build_number < 22000:
-        print(f"Unsupported Windows version: build {build_number}. Requires Windows 11 (build 22000+).")
-        sys.exit(1)
-    
-    print(f"OS compatibility check passed: Windows 11 build {build_number}\n")
-
-# ===============================
 # Helper to run WMIC commands
 # ===============================
 def run_wmic(command):
@@ -42,6 +17,27 @@ def run_wmic(command):
     except:
         return "Unavailable"
 
+# ===============================
+# Check Windows 11 compatibility
+# ===============================
+def check_windows11():
+    os_name = platform.system()
+    if os_name != "Windows":
+        return False, f"Unsupported OS: {os_name}"
+    
+    try:
+        build_number = int(subprocess.check_output(
+            'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion" /v CurrentBuildNumber',
+            shell=True
+        ).decode().split()[-1])
+    except Exception as e:
+        return False, f"Could not determine Windows build number: {e}"
+
+    if build_number >= 22000:
+        return True, f"Windows 11 detected (build {build_number})"
+    else:
+        return False, f"Unsupported Windows version: build {build_number} (requires 22000+)"
+    
 # ===============================
 # Get system information
 # ===============================
@@ -110,7 +106,7 @@ def get_system_info():
 # ===============================
 # Save info to timestamped text file in the script's folder
 # ===============================
-def save_to_file(info):
+def save_to_file(info, win11_status):
     # Get folder where the script is located
     script_folder = os.path.dirname(os.path.abspath(__file__))
     
@@ -120,6 +116,15 @@ def save_to_file(info):
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("SYSTEM INVENTORY REPORT\n")
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # Windows 11 compatibility section
+        f.write("=== Windows 11 Compatibility ===\n")
+        if win11_status[0]:
+            f.write(f"✔ {win11_status[1]}\n\n")
+        else:
+            f.write(f"✖ {win11_status[1]}\n\n")
+        
+        # All other system info
         for key, value in info.items():
             f.write(f"{key}: {value}\n")
     
@@ -129,6 +134,6 @@ def save_to_file(info):
 # Main Execution
 # ===============================
 if __name__ == "__main__":
-    check_compatibility()
+    win11_status = check_windows11()
     system_info = get_system_info()
-    save_to_file(system_info)
+    save_to_file(system_info, win11_status)
