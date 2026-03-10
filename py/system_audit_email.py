@@ -1,13 +1,15 @@
 import platform
 import socket
-import uuid
 import psutil
 import subprocess
 from datetime import datetime
 import os
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
 
 # ===============================
-# Helper to run WMIC commands
+# Helper
 # ===============================
 def run_wmic(command):
     try:
@@ -17,162 +19,191 @@ def run_wmic(command):
         return "Unavailable"
 
 # ===============================
-# TPM 2.0 check (PowerShell + fallback registry)
+# TPM Check
 # ===============================
 def check_tpm():
     try:
         output = subprocess.check_output(
-            'powershell -Command "Get-Tpm | Select-Object -Property TpmPresent, TpmReady, TpmVersion"',
+            'powershell -Command "Get-Tpm | Select-Object TpmPresent,TpmReady,TpmVersion"',
             shell=True
-        ).decode().strip().replace("\r","")
-        lines = [line for line in output.split("\n") if line.strip()]
-        if len(lines) < 2:
-            raise Exception("PowerShell TPM returned no data")
-        tpm_values = lines[1].split()
-        tpm_present = tpm_values[0].lower() == "true"
-        tpm_ready = tpm_values[1].lower() == "true"
-        tpm_version_ok = len(tpm_values) > 2 and "2.0" in tpm_values[2]
-        status = "✔" if tpm_present and tpm_ready and tpm_version_ok else "✖"
-        return f"TpmPresent: {tpm_values[0]}, TpmReady: {tpm_values[1]}, TpmVersion: {tpm_values[2] if len(tpm_values)>2 else 'N/A'} - {status}"
-    except:
-        try:
-            reg = subprocess.check_output(
-                'reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\TPM" /v Enabled',
-                shell=True
-            ).decode()
-            if "0x1" in reg:
-                return "TPM Present (Registry) - ✔"
+        ).decode()
+
+        lines = [l for l in output.split("\n") if l.strip()]
+        if len(lines) >= 2:
+            values = lines[1].split()
+            present = values[0]
+            ready = values[1]
+            version = values[2] if len(values) > 2 else "N/A"
+
+            if present.lower() == "true" and "2.0" in version:
+                return f"{version} ✔"
             else:
-                return "TPM not detected (Registry) - ✖"
-        except:
-            return "TPM check unavailable - ✖"
+                return f"{version} ✖"
+
+    except:
+        pass
+
+    return "Unavailable ✖"
 
 # ===============================
-# Secure Boot check (PowerShell + fallback registry)
+# Secure Boot
 # ===============================
 def check_secure_boot():
     try:
         sb = subprocess.check_output(
             'powershell -Command "Confirm-SecureBootUEFI"',
-            shell=True, stderr=subprocess.DEVNULL
+            shell=True,
+            stderr=subprocess.DEVNULL
         ).decode().strip()
+
         if sb.lower() == "true":
             return "Enabled ✔"
         else:
             return "Disabled ✖"
+
     except:
-        try:
-            reg = subprocess.check_output(
-                'reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State" /v UEFISecureBootEnabled',
-                shell=True
-            ).decode()
-            if "0x1" in reg:
-                return "Enabled (Registry) ✔"
-            else:
-                return "Disabled (Registry) ✖"
-        except:
-            return "Check unavailable - ✖"
+        return "Unavailable ✖"
 
 # ===============================
-# Check Windows 11 requirements
+# Windows 11 Requirements
 # ===============================
 def check_win11_requirements():
     results = {}
     cores = psutil.cpu_count(logical=False)
     arch = platform.machine()
-    cpu_ok = cores >= 2 and arch.endswith('64')
-    results["CPU"] = f"{cores} cores, {arch} - {'✔' if cpu_ok else '✖'}"
-    ram_gb = round(psutil.virtual_memory().total / (1024**3))
-    ram_ok = ram_gb >= 4
-    results["RAM"] = f"{ram_gb} GB - {'✔' if ram_ok else '✖'}"
-    try:
-        disk = psutil.disk_usage("C:\\")
-        disk_gb = disk.total // (1024**3)
-        storage_ok = disk_gb >= 64
-        results["Storage"] = f"{disk_gb} GB - {'✔' if storage_ok else '✖'}"
-    except:
-        results["Storage"] = "Unknown - ✖"
+    results["CPU"] = f"{cores} cores ({arch})"
+    ram = round(psutil.virtual_memory().total / (1024**3))
+    results["RAM"] = f"{ram} GB"
+    disk = psutil.disk_usage("C:\\")
+    disk_gb = disk.total // (1024**3)
+    results["Storage"] = f"{disk_gb} GB"
     results["TPM 2.0"] = check_tpm()
     results["Secure Boot"] = check_secure_boot()
     return results
 
 # ===============================
-# Get system information
+# System Information
 # ===============================
 def get_system_info():
     info = {}
-    info["Computer Name"] = socket.gethostname()
-    info["User"] = platform.node()
-    info["OS"] = platform.system() + " " + platform.release()
-    info["OS Version"] = platform.version()
-    info["Architecture"] = "64-bit" if platform.machine().endswith('64') else "32-bit"
-    info["CPU"] = platform.processor()
-    info["CPU Cores"] = psutil.cpu_count(logical=False)
-    info["CPU Threads"] = psutil.cpu_count(logical=True)
+    boot = datetime.fromtimestamp(psutil.boot_time())
+    info["OS & Uptime"] = {
+        "Computer Name": socket.gethostname(),
+        "OS": platform.system(),
+        "Version": platform.version(),
+        "Architecture": platform.machine(),
+        "Boot Time": boot.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    info["CPU"] = {
+        "Processor": platform.processor(),
+        "Cores": psutil.cpu_count(logical=False),
+        "Threads": psutil.cpu_count(logical=True)
+    }
     ram = psutil.virtual_memory()
-    info["Total RAM"] = f"{round(ram.total / (1024**3),2)} GB"
-    info["Motherboard Manufacturer"] = run_wmic("wmic baseboard get manufacturer")
-    info["Motherboard Model"] = run_wmic("wmic baseboard get product")
-    info["Motherboard Version"] = run_wmic("wmic baseboard get version")
-    info["BIOS Version"] = run_wmic("wmic bios get smbiosbiosversion")
-
-    # Multiple GPUs
+    info["Memory"] = {"Total RAM": f"{round(ram.total/(1024**3),2)} GB"}
+    info["Motherboard"] = {
+        "Manufacturer": run_wmic("wmic baseboard get manufacturer"),
+        "Model": run_wmic("wmic baseboard get product"),
+        "Version": run_wmic("wmic baseboard get version")
+    }
+    info["BIOS"] = {"BIOS Version": run_wmic("wmic bios get smbiosbiosversion")}
+    # GPU
     try:
-        gpu = subprocess.check_output("wmic path win32_VideoController get name", shell=True).decode().split("\n")[1:]
+        gpu = subprocess.check_output(
+            "wmic path win32_VideoController get name",
+            shell=True
+        ).decode().split("\n")[1:]
         gpu_names = [g.strip() for g in gpu if g.strip()]
-        info["GPU(s)"] = ", ".join(gpu_names)
+        info["GPU"] = {"Devices": ", ".join(gpu_names)}
     except:
-        info["GPU(s)"] = "Unavailable"
-
-    # Disks
+        info["GPU"] = {"Devices": "Unavailable"}
+    # Storage
     disks = []
     for part in psutil.disk_partitions():
         try:
             usage = psutil.disk_usage(part.mountpoint)
-            free = round(usage.free / (1024**3), 2)
-            disks.append(f"{part.device} : {round(usage.total / (1024**3))} GB total, {free} GB free")
+            disks.append(f"{part.device} {round(usage.total/(1024**3))}GB (Free {round(usage.free/(1024**3))}GB)")
         except:
             pass
-    info["Disks"] = ", ".join(disks)
-
-    # Multiple network adapters
+    info["Storage"] = {"Disks": ", ".join(disks)}
+    # Network
     adapters = []
     for nic, addrs in psutil.net_if_addrs().items():
-        ip_list = [a.address for a in addrs if a.family.name == 'AF_INET']
-        mac_list = [a.address for a in addrs if a.family.name == 'AF_LINK']
-        ip_str = ", ".join(ip_list) if ip_list else "N/A"
-        mac_str = ", ".join(mac_list) if mac_list else "N/A"
-        adapters.append(f"{nic} - IP: {ip_str}, MAC: {mac_str}")
-    info["Network Adapters"] = "\n".join(adapters)
-
-    boot = datetime.fromtimestamp(psutil.boot_time())
-    info["System Boot Time"] = boot.strftime("%Y-%m-%d %H:%M:%S")
+        ip = "N/A"
+        mac = "N/A"
+        for addr in addrs:
+            if addr.family.name == "AF_INET":
+                ip = addr.address
+            if addr.family.name == "AF_LINK":
+                mac = addr.address
+        adapters.append(f"{nic}  IP:{ip}  MAC:{mac}")
+    info["Network"] = {"Adapters": " | ".join(adapters)}
     return info
 
 # ===============================
-# Save to file
+# Save Reports
 # ===============================
-def save_to_file(info, win11_checks):
-    script_folder = os.path.dirname(os.path.abspath(__file__))
-    output_folder = os.path.join(script_folder, "output")
-    os.makedirs(output_folder, exist_ok=True)
+def save_report(path, format_type):
+    win11 = check_win11_requirements()
+    sysinfo = get_system_info()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    OUTPUT_FILE = os.path.join(output_folder, f"system_inventory_{timestamp}.txt")
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write("SYSTEM INVENTORY REPORT\n")
-        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        f.write("=== Windows 11 Technical Requirements ===\n")
-        for k, v in win11_checks.items():
-            f.write(f"{k}: {v}\n")
-        f.write("\n=== System Information ===\n")
-        for key, value in info.items():
-            f.write(f"{key}: {value}\n")
-    print(f"System info saved to {OUTPUT_FILE}")
+    data = []
+    for section, items in sysinfo.items():
+        for k, v in items.items():
+            data.append([section, k, v])
+    for k, v in win11.items():
+        data.append(["Windows11 Requirements", k, v])
+    df = pd.DataFrame(data, columns=["Section","Item","Value"])
+    filename = os.path.join(path, f"system_report_{timestamp}")
+    if format_type == "TXT":
+        with open(filename+".txt","w",encoding="utf-8") as f:
+            f.write("SYSTEM REPORT\n\n")
+            for row in data:
+                f.write(f"{row[0]} | {row[1]} : {row[2]}\n")
+    elif format_type == "CSV":
+        df.to_csv(filename+".csv", index=False)
+    elif format_type == "Excel":
+        # Old Excel format (.xls)
+        df.to_excel(filename+".xls", index=False, engine='xlwt')
+    messagebox.showinfo("Complete","Report Generated")
 
 # ===============================
-# Main
+# GUI
 # ===============================
-if __name__ == "__main__":
-    win11_checks = check_win11_requirements()
-    system_info = get_system_info()
-    save_to_file(system_info, win11_checks)
+def browse_folder():
+    folder = filedialog.askdirectory()
+    path_var.set(folder)
+
+def run_scan():
+    path = path_var.get()
+    format_type = format_var.get()
+    if not path:
+        messagebox.showerror("Error","Please choose an output folder")
+        return
+    save_report(path, format_type)
+
+root = tk.Tk()
+root.title("RD3 System Scanner")
+root.geometry("450x240")
+path_var = tk.StringVar()
+format_var = tk.StringVar(value="TXT")
+tk.Label(root,text="Output Folder").pack(pady=5)
+frame = tk.Frame(root)
+frame.pack()
+tk.Entry(frame,textvariable=path_var,width=35).pack(side="left")
+tk.Button(frame,text="Browse",command=browse_folder).pack(side="left")
+tk.Label(root,text="Output Format").pack(pady=10)
+ttk.Combobox(
+    root,
+    textvariable=format_var,
+    values=["TXT","CSV","Excel"],
+    state="readonly"
+).pack()
+tk.Button(
+    root,
+    text="Run System Scan",
+    command=run_scan,
+    height=2,
+    width=25
+).pack(pady=20)
+root.mainloop()
