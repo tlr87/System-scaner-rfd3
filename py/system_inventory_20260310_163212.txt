@@ -1,0 +1,21 @@
+SYSTEM INVENTORY REPORT
+Generated: 2026-03-10 16:32:12
+
+Computer Name: TomsPC
+User: TomsPC
+OS: Windows 11
+OS Version: 10.0.26200
+Architecture: 64-bit
+CPU: Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+CPU Cores: 24
+CPU Threads: 32
+Total RAM: 63.71 GB
+Motherboard Manufacturer: Micro-Star International Co., Ltd.
+Motherboard Model: MAG Z790 TOMAHAWK WIFI (MS-7D91)
+Motherboard Version: 4.0
+BIOS Version: H.H0
+GPU: Parsec Virtual Display Adapter, Intel(R) UHD Graphics 770, NVIDIA GeForce RTX 4080
+Disks: C:\ : 931 GB, D:\ : 931 GB, E:\ : 1863 GB, F:\ : 466 GB, G:\ : 932 GB, H:\ : 7452 GB, J:\ : 931 GB, M:\ : 3726 GB, W:\ : 932 GB
+IP Address: 192.168.0.5
+MAC Address: ff:9d
+System Boot Time: 2026-03-10 13:03:57
